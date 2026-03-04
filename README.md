@@ -32,7 +32,7 @@ Elastic Cloud (Kibana 9.3+)            EKS Cluster (ap-south-1)                A
 - eksctl
 - Elastic Cloud with Kibana 9.3+ (for MCP connector support)
 
-## Step 1: IAM Permissions
+## Step 1: IAM Permissions (For testing / local validation only)
 
 Attach the AWS managed policy for read-only access to the managed EKS MCP server:
 
@@ -53,7 +53,7 @@ aws sts get-caller-identity
 aws eks list-clusters --region ap-south-1
 ```
 
-## Step 2: Local Validation (Cursor)
+## Step 2: Local Validation (Cursor) (For testing / local validation only)
 
 Validate the managed service works locally before deploying the bridge. The `.cursor/mcp.json` in this repo is pre-configured. Open this repo in Cursor, then in agent chat ask:
 
