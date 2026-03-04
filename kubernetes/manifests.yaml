@@ -1,0 +1,76 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: eks-mcp-bridge-token
+  namespace: eks-mcp-bridge
+type: Opaque
+stringData:
+  API_ACCESS_TOKEN: "o25elUoFCv5ABrU843kEWo3Ym5TTF6vES9MFvYwJPqY="
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: eks-mcp-bridge
+  namespace: eks-mcp-bridge
+  labels:
+    app: eks-mcp-bridge
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: eks-mcp-bridge
+  template:
+    metadata:
+      labels:
+        app: eks-mcp-bridge
+    spec:
+      serviceAccountName: eks-mcp-bridge-sa
+      containers:
+        - name: eks-mcp-bridge
+          image: 461485115270.dkr.ecr.ap-south-1.amazonaws.com/eks-mcp-bridge:latest
+          ports:
+            - containerPort: 8888
+              protocol: TCP
+          env:
+            - name: API_ACCESS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: eks-mcp-bridge-token
+                  key: API_ACCESS_TOKEN
+            - name: AWS_REGION
+              value: "ap-south-1"
+            - name: AWS_DEFAULT_REGION
+              value: "ap-south-1"
+          readinessProbe:
+            tcpSocket:
+              port: 8888
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 8888
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: eks-mcp-bridge
+  namespace: eks-mcp-bridge
+  labels:
+    app: eks-mcp-bridge
+spec:
+  type: LoadBalancer
+  selector:
+    app: eks-mcp-bridge
+  ports:
+    - port: 8888
+      targetPort: 8888
+      protocol: TCP
