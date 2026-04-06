@@ -120,7 +120,43 @@ Verify the annotation:
 kubectl get sa eks-mcp-bridge-sa -n eks-mcp-bridge -o yaml | grep eks.amazonaws.com/role-arn
 ```
 
-## Step 5: Deploy to EKS
+## Step 5: Map IRSA Role in aws-auth and Apply RBAC
+
+The managed EKS MCP server uses the caller's IAM identity to make Kubernetes API calls on the target cluster. The IRSA role from Step 4 must be mapped to a Kubernetes identity with read permissions, otherwise K8s API calls (e.g. `get_pod_logs`) will fail with 401 Unauthorized.
+
+### 5a. Add the IRSA role to the aws-auth ConfigMap
+
+Get the IRSA role ARN:
+
+```bash
+kubectl get sa eks-mcp-bridge-sa -n eks-mcp-bridge \
+  -o jsonpath='{.metadata.annotations.eks\.amazonaws\.com/role-arn}'
+```
+
+Edit the `aws-auth` ConfigMap to add the role:
+
+```bash
+kubectl edit configmap aws-auth -n kube-system
+```
+
+Add this entry under `mapRoles` (replace the `rolearn` with your actual value):
+
+```yaml
+- groups:
+  - eks-mcp-readers
+  rolearn: arn:aws:iam::<account-id>:role/<irsa-role-name>
+  username: eks-mcp-bridge
+```
+
+### 5b. Apply the RBAC ClusterRole and ClusterRoleBinding
+
+```bash
+kubectl apply -f kubernetes/rbac.yaml
+```
+
+This creates a `eks-mcp-reader` ClusterRole with read-only access to pods, logs, events, deployments, services, nodes, and more, and binds it to the `eks-mcp-readers` group.
+
+## Step 6: Deploy to EKS
 
 Before applying, update `kubernetes/manifests.yaml`:
 - Replace the `image:` field with your ECR image URI
@@ -155,9 +191,9 @@ curl -s -m 15 -X POST "http://${LB_HOST}:8888/mcp" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
 ```
 
-## Step 6: Connect to Elastic Agent Builder
+## Step 7: Connect to Elastic Agent Builder
 
-### 6a. Create MCP Connector in Kibana
+### 7a. Create MCP Connector in Kibana
 
 1. Go to **Stack Management > Connectors > Create connector**
 2. Select **MCP** connector type
@@ -167,7 +203,7 @@ curl -s -m 15 -X POST "http://${LB_HOST}:8888/mcp" \
    - **HTTP Headers** (secret type): Key=`Authorization`, Value=`Bearer <your-bearer-token>`
 4. Click **Test** to verify the connection
 
-### 6b. Bulk Import MCP Tools
+### 7b. Bulk Import MCP Tools
 
 1. Go to **Agent Builder > Tools**
 2. Click **Manage MCP > Bulk import MCP tools**
@@ -175,7 +211,7 @@ curl -s -m 15 -X POST "http://${LB_HOST}:8888/mcp" \
 4. Select the tools to import
 5. Set namespace prefix: `eks`
 
-### 6c. Test End-to-End
+### 7c. Test End-to-End
 
 Create or edit an agent, add the imported EKS tools, then test in chat:
 
@@ -200,6 +236,8 @@ Create or edit an agent, add the imported EKS tools, then test in chat:
 - [ ] Managed EKS MCP server works locally -- Cursor agent lists clusters and tools
 - [ ] Docker image builds and runs -- `docker run` + `curl` test passes
 - [ ] IRSA service account created -- annotation shows role ARN
+- [ ] IRSA role mapped in aws-auth -- `kubectl get cm aws-auth -n kube-system` shows the role
+- [ ] RBAC applied -- `kubectl get clusterrole eks-mcp-reader` exists
 - [ ] K8s deployment healthy -- pod running, port-forward test passes
 - [ ] LoadBalancer reachable -- `curl` to external endpoint works
 - [ ] Elastic MCP connector connects -- "Test connection" in Kibana succeeds
@@ -212,5 +250,6 @@ Create or edit an agent, add the imported EKS tools, then test in chat:
 - **Network:** Restrict LoadBalancer security group to Elastic Cloud IP ranges only.
 - **TLS:** For production, add an Ingress with TLS termination (ACM cert + ALB Ingress Controller).
 - **IRSA:** Least-privilege -- only `AmazonEKSMCPReadOnlyAccess` unless write tools are needed.
+- **K8s RBAC:** The `eks-mcp-reader` ClusterRole grants read-only access. For write tools, extend the role or create a separate one with write verbs.
 - **Read-only mode:** Add `--read-only` flag to `mcp-proxy-for-aws` in the Dockerfile to restrict to read-only tools.
 - **CloudTrail:** The managed service automatically logs all tool calls for auditing.
