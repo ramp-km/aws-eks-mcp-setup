@@ -1,3 +1,18 @@
 {
-  "mcpServers": {}
+  "mcpServers": {
+    "aws-eks-mcp": {
+      "command": "uvx",
+      "args": [
+        "mcp-proxy-for-aws@latest",
+        "https://eks-mcp.ap-south-1.api.aws/mcp",
+        "--service",
+        "eks-mcp",
+        "--region",
+        "ap-south-1"
+      ],
+      "env": {
+        "AWS_REGION": "ap-south-1"
+      }
+    }
+  }
 }
