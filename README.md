@@ -200,7 +200,7 @@ curl -s -m 15 -X POST "http://${LB_HOST}:8888/mcp" \
 3. Configure:
    - **Name:** `AWS EKS MCP (Managed)`
    - **Server URL:** `http://<LoadBalancer-hostname>:8888/mcp`
-   - **HTTP Headers** (secret type): Key=`Authorization`, Value=`Bearer <your-bearer-token>`
+   - **HTTP Headers** (secret type): Key=`Authorization`, Value=`Bearer <API_ACCESS_TOKEN from Step-6>` 
 4. Click **Test** to verify the connection
 
 ### 7b. Bulk Import MCP Tools
