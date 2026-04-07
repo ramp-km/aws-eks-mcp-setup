@@ -55,7 +55,7 @@ aws eks list-clusters --region ap-south-1
 
 ## Step 2: Local Validation (Cursor) (For testing / local validation only)
 
-Validate the managed service works locally before deploying the bridge. The `.cursor/mcp.json` in this repo is pre-configured to work with ap-south-1 region. Modify it to use the AWS region of your choie. Open this repo in Cursor, then in agent chat ask:
+Validate the managed service works locally before deploying the bridge. The `.cursor/mcp.json` in this repo is pre-configured to work with ap-south-1 region. Modify it to use the AWS region of your choice. Open this repo in Cursor, then in agent chat ask:
 
 - "What EKS MCP tools are available?"
 - "List all EKS clusters in ap-south-1"
