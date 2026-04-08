@@ -55,7 +55,7 @@ aws eks list-clusters --region ap-south-1
 
 ## Step 2: Local Validation (Cursor) (For testing / local validation only)
 
-Validate the managed service works locally before deploying the bridge. The `.cursor/mcp.json` in this repo is pre-configured. Open this repo in Cursor, then in agent chat ask:
+Validate the managed service works locally before deploying the bridge. The `.cursor/mcp.json` in this repo is pre-configured to work with ap-south-1 region. Modify it to use the AWS region of your choice. Open this repo in Cursor, then in agent chat ask:
 
 - "What EKS MCP tools are available?"
 - "List all EKS clusters in ap-south-1"
@@ -129,8 +129,7 @@ The managed EKS MCP server uses the caller's IAM identity to make Kubernetes API
 Get the IRSA role ARN:
 
 ```bash
-kubectl get sa eks-mcp-bridge-sa -n eks-mcp-bridge \
-  -o jsonpath='{.metadata.annotations.eks\.amazonaws\.com/role-arn}'
+kubectl get sa eks-mcp-bridge-sa -n eks-mcp-bridge -o yaml | grep eks.amazonaws.com/role-arn
 ```
 
 Edit the `aws-auth` ConfigMap to add the role:
@@ -142,10 +141,10 @@ kubectl edit configmap aws-auth -n kube-system
 Add this entry under `mapRoles` (replace the `rolearn` with your actual value):
 
 ```yaml
-- groups:
-  - eks-mcp-readers
-  rolearn: arn:aws:iam::<account-id>:role/<irsa-role-name>
-  username: eks-mcp-bridge
+    - rolearn: <irsa-role-arn>
+      username: eks-mcp-bridge-sa
+      groups:
+      - eks-mcp-readers
 ```
 
 ### 5b. Apply the RBAC ClusterRole and ClusterRoleBinding
@@ -200,7 +199,7 @@ curl -s -m 15 -X POST "http://${LB_HOST}:8888/mcp" \
 3. Configure:
    - **Name:** `AWS EKS MCP (Managed)`
    - **Server URL:** `http://<LoadBalancer-hostname>:8888/mcp`
-   - **HTTP Headers** (secret type): Key=`Authorization`, Value=`Bearer <your-bearer-token>`
+   - **HTTP Headers** (secret type): Key=`Authorization`, Value=`Bearer <API_ACCESS_TOKEN from Step-6>` 
 4. Click **Test** to verify the connection
 
 ### 7b. Bulk Import MCP Tools
