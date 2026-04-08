@@ -142,10 +142,10 @@ kubectl edit configmap aws-auth -n kube-system
 Add this entry under `mapRoles` (replace the `rolearn` with your actual value):
 
 ```yaml
-- groups:
-  - eks-mcp-readers
-  rolearn: arn:aws:iam::<account-id>:role/<irsa-role-name>
-  username: eks-mcp-bridge
+    - rolearn: arn:aws:iam::<account-id>:role/<irsa-role-name>
+      username: eks-mcp-bridge-sa
+      groups:
+      - eks-mcp-readers
 ```
 
 ### 5b. Apply the RBAC ClusterRole and ClusterRoleBinding
