@@ -5,7 +5,7 @@ metadata:
   namespace: eks-mcp-bridge
 type: Opaque
 stringData:
-  API_ACCESS_TOKEN: "o25elUoFCv5ABrU843kEWo3Ym5TTF6vES9MFvYwJPqY="
+  API_ACCESS_TOKEN: "<api-access-token>"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -27,7 +27,7 @@ spec:
       serviceAccountName: eks-mcp-bridge-sa
       containers:
         - name: eks-mcp-bridge
-          image: 461485115270.dkr.ecr.ap-south-1.amazonaws.com/eks-mcp-bridge:latest
+          image: <eks-mcp-bridge-image-uri>
           ports:
             - containerPort: 8888
               protocol: TCP
@@ -38,9 +38,9 @@ spec:
                   name: eks-mcp-bridge-token
                   key: API_ACCESS_TOKEN
             - name: AWS_REGION
-              value: "ap-south-1"
+              value: <aws-region>
             - name: AWS_DEFAULT_REGION
-              value: "ap-south-1"
+              value: <aws-region>
           readinessProbe:
             tcpSocket:
               port: 8888

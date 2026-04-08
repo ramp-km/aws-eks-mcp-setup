@@ -1,8 +1,16 @@
+# Kubernetes API access for EKS MCP tools (list_k8s_resources, list_api_versions, read_k8s_resource, etc.).
+# The list_eks_resources tool calls the AWS EKS control plane API (ListClusters, ListAddons, …); that requires
+# IAM on the bridge role (e.g. AmazonEKSMCPReadOnlyAccess), not RBAC.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: eks-mcp-reader
 rules:
+  - nonResourceURLs: ["/api", "/api/*", "/apis", "/apis/*", "/openapi/v2", "/version"]
+    verbs: ["get"]
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: [""]
     resources: ["pods", "pods/log", "services", "endpoints", "events", "configmaps", "namespaces", "nodes", "persistentvolumeclaims", "persistentvolumes", "replicationcontrollers", "serviceaccounts"]
     verbs: ["get", "list", "watch"]
@@ -23,6 +31,9 @@ rules:
     verbs: ["get", "list", "watch"]
   - apiGroups: ["storage.k8s.io"]
     resources: ["storageclasses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["eks.services.k8s.aws"]
+    resources: ["clusters"]
     verbs: ["get", "list", "watch"]
   - apiGroups: ["rbac.authorization.k8s.io"]
     resources: ["roles", "rolebindings", "clusterroles", "clusterrolebindings"]

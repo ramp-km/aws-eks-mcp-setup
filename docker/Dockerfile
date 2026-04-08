@@ -11,6 +11,6 @@ ENTRYPOINT ["mcp-proxy", \
             "--pass-environment", \
             "--", \
             "mcp-proxy-for-aws", \
-            "https://eks-mcp.ap-south-1.api.aws/mcp", \
+            "https://eks-mcp.<aws-region>.api.aws/mcp", \
             "--service", "eks-mcp", \
-            "--region", "ap-south-1"]
+            "--region", "<aws-region>"]
