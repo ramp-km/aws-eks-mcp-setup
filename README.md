@@ -129,8 +129,7 @@ The managed EKS MCP server uses the caller's IAM identity to make Kubernetes API
 Get the IRSA role ARN:
 
 ```bash
-kubectl get sa eks-mcp-bridge-sa -n eks-mcp-bridge \
-  -o jsonpath='{.metadata.annotations.eks\.amazonaws\.com/role-arn}'
+kubectl get sa eks-mcp-bridge-sa -n eks-mcp-bridge -o yaml | grep eks.amazonaws.com/role-arn
 ```
 
 Edit the `aws-auth` ConfigMap to add the role:
@@ -142,7 +141,7 @@ kubectl edit configmap aws-auth -n kube-system
 Add this entry under `mapRoles` (replace the `rolearn` with your actual value):
 
 ```yaml
-    - rolearn: arn:aws:iam::<account-id>:role/<irsa-role-name>
+    - rolearn: <irsa-role-arn>
       username: eks-mcp-bridge-sa
       groups:
       - eks-mcp-readers
