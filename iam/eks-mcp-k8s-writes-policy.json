@@ -1,0 +1,33 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EksMcpPrivilegedAndReadTools",
+      "Effect": "Allow",
+      "Action": [
+        "eks-mcp:InvokeMcp",
+        "eks-mcp:CallReadOnlyTool",
+        "eks-mcp:CallPrivilegedTool"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "EksKubernetesApiAndDescribe",
+      "Effect": "Allow",
+      "Action": [
+        "eks:AccessKubernetesApi",
+        "eks:DescribeCluster",
+        "eks:ListClusters",
+        "eks:DescribeAddon",
+        "eks:ListAddons",
+        "eks:DescribeNodegroup",
+        "eks:ListNodegroups",
+        "eks:DescribeAccessEntry",
+        "eks:ListAccessEntries",
+        "eks:DescribeInsight",
+        "eks:ListInsights"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
