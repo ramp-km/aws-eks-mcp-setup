@@ -5,7 +5,7 @@ Bridge the AWS fully managed EKS MCP server (preview) to Elastic Agent Builder v
 ## Architecture
 
 ```
-Elastic Cloud (Kibana 9.3+)            EKS Cluster (ap-south-1)                AWS Managed Service
+Elastic Cloud (Kibana 9.3+)            EKS Cluster (<your-aws-region>)                AWS Managed Service
 +-----------------------+     HTTPS     +---------------------------+   SigV4   +---------------------+
 | Agent Builder         |  + Bearer     | Pod: eks-mcp-bridge       |  signed   | EKS MCP Server      |
 |   -> MCP Connector    | ----------->  |   mcp-proxy (SSE/HTTP)    | -------> | eks-mcp.region.     |
@@ -90,15 +90,15 @@ kubectl rollout restart deployment eks-mcp-bridge -n eks-mcp-bridge
 
 ```bash
 aws sts get-caller-identity
-aws eks list-clusters --region ap-south-1
+aws eks list-clusters --region <your-aws-region>
 ```
 
 ## Step 2: Local Validation (Cursor) (For testing / local validation only)
 
-Validate the managed service works locally before deploying the bridge. The `.cursor/mcp.json` in this repo is pre-configured to work with ap-south-1 region. Modify it to use the AWS region of your choice. Open this repo in Cursor, then in agent chat ask:
+Validate the managed service works locally before deploying the bridge. Open this repo in Cursor, then in agent chat ask:
 
 - "What EKS MCP tools are available?"
-- "List all EKS clusters in ap-south-1"
+- "List all EKS clusters in <your-aws-region>"
 
 If using a different region or AWS profile, edit `.cursor/mcp.json` accordingly.
 
@@ -113,7 +113,7 @@ docker buildx build --platform linux/amd64 -t eks-mcp-bridge:latest .
 # Local test (mount AWS creds)
 docker run -p 8888:8888 \
   -e API_ACCESS_TOKEN="test-token" \
-  -e AWS_REGION="ap-south-1" \
+  -e AWS_REGION="<your-aws-region>" \
   -v ~/.aws:/root/.aws:ro \
   eks-mcp-bridge:latest
 
@@ -128,7 +128,7 @@ Push to ECR:
 
 ```bash
 AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-AWS_REGION="ap-south-1"
+AWS_REGION="<your-aws-region>"
 
 aws ecr create-repository --repository-name eks-mcp-bridge --region $AWS_REGION 2>/dev/null
 aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
@@ -149,7 +149,7 @@ eksctl create iamserviceaccount \
   --name eks-mcp-bridge-sa \
   --namespace eks-mcp-bridge \
   --cluster <your-cluster-name> \
-  --region ap-south-1 \
+  --region <your-aws-region> \
   --attach-policy-arn arn:aws:iam::aws:policy/AmazonEKSMCPReadOnlyAccess \
   --attach-policy-arn arn:aws:iam::<account-id>:policy/EksMcpPrivilegedK8sWritesAddon \
   --approve
@@ -283,7 +283,7 @@ curl -s -m 15 -X POST "http://${LB_HOST}:8888/mcp" \
 
 Create or edit an agent, add the imported EKS tools, then test in chat:
 
-- "List all EKS clusters in ap-south-1"
+- "List all EKS clusters in <your-aws-region>"
 - "Show me pods in the default namespace"
 - "What events are happening in my cluster?"
 - "Search the EKS troubleshooting guide for pod networking issues"
