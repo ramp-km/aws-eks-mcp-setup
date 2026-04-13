@@ -80,6 +80,12 @@ aws iam attach-role-policy \
 
 For **`manage_eks_stacks`**, **`add_inline_policy`**, or full cluster provisioning, use the broader example in [AWS Getting Started Step 2](https://docs.aws.amazon.com/eks/latest/userguide/eks-mcp-getting-started.html) instead of the trimmed policies above.
 
+After attaching or changing IAM policies on the bridge IRSA role, **restart the bridge Deployment** so the pod picks up credentials that include the new permissions (otherwise `manage_k8s_resource` may return HTTP 403 until the next credential refresh):
+
+```bash
+kubectl rollout restart deployment eks-mcp-bridge -n eks-mcp-bridge
+```
+
 **Verify:**
 
 ```bash
@@ -295,6 +301,16 @@ With write tools enabled (IAM + RBAC + public endpoint per AWS docs), you can al
 | Troubleshooting | `get_pod_logs`, `get_k8s_events`, `get_cloudwatch_logs`, `get_cloudwatch_metrics`, `get_eks_metrics_guidance` |
 | Documentation | `search_eks_documentation`, `search_eks_troubleshooting_guide` |
 | IAM / Security | `get_policies_for_role`, `add_inline_policy` |
+
+## Optional: test write path from your laptop
+
+With `kubectl` pointed at the cluster and the bridge LoadBalancer up:
+
+```bash
+python3 scripts/test_mcp_write.py
+```
+
+This calls `manage_k8s_resource` with a rollout-style patch on `Deployment/cart` in `default` (edit the script to change cluster name or workload). Expect `Successfully patched Deployment` and `exit=0`.
 
 ## Testing Checklist
 
