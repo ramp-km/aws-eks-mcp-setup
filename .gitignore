@@ -7,3 +7,4 @@ kubernetes/manifests.rendered.yaml
 .DS_Store
 __pycache__/
 *.pyc
+.cursor/mcp.json

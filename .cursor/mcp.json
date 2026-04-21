@@ -4,14 +4,14 @@
       "command": "uvx",
       "args": [
         "mcp-proxy-for-aws@latest",
-        "https://eks-mcp.us-east-1.api.aws/mcp",
+        "https://eks-mcp.ap-south-1.api.aws/mcp",
         "--service",
         "eks-mcp",
         "--region",
-        "us-east-1"
+        "ap-south-1"
       ],
       "env": {
-        "AWS_REGION": "us-east-1"
+        "AWS_REGION": "ap-south-1"
       }
     }
   }

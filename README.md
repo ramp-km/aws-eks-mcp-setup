@@ -137,12 +137,34 @@ aws iam create-policy \
 
 For **`manage_eks_stacks`**, **`add_inline_policy`**, or full cluster provisioning, use the broader example in [AWS Getting Started Step 2](https://docs.aws.amazon.com/eks/latest/userguide/eks-mcp-getting-started.html) instead of the trimmed policy above.
 
-**Verify:**
+**Verify** (with `.env` loaded; these checks match what Step 2 and Step 3 rely on: the managed read-only policy, and the customer-managed add-on you just created if you use privileged K8s tools):
 
 ```bash
-aws sts get-caller-identity
-aws eks list-clusters --region "${AWS_REGION}"
+# 1) Managed policy used in Step 3 for read-only MCP tools (no create step; confirm it is visible in IAM)
+aws iam get-policy \
+  --policy-arn arn:aws:iam::aws:policy/AmazonEKSMCPReadOnlyAccess \
+  --query 'Policy.{Arn:Arn,DefaultVersionId:DefaultVersionId}' \
+  --output table
+
+# 2) Customer policy created in the command block above (required before attaching it in Step 3)
+aws iam get-policy \
+  --policy-arn "arn:aws:iam::${AWS_ACCOUNT_ID}:policy/EksMcpPrivilegedK8sWritesAddon" \
+  --output table
 ```
+
+The second command should return the policy’s ARN, default version, and update time. If you are **read-only only** and did **not** run `aws iam create-policy`, expect that command to fail; skip it and do not add the second `--attach-policy-arn` in Step 3.
+
+**Optional (confirm the add-on’s JSON has the expected privileges):**
+
+```bash
+ADDON_ARN="arn:aws:iam::${AWS_ACCOUNT_ID}:policy/EksMcpPrivilegedK8sWritesAddon"
+VER=$(aws iam get-policy --policy-arn "$ADDON_ARN" --query Policy.DefaultVersionId --output text)
+aws iam get-policy-version --policy-arn "$ADDON_ARN" --version-id "$VER" \
+  --query 'PolicyVersion.Document' \
+  --output json
+```
+
+Compare the output to [iam/eks-mcp-privileged-addon-policy.json](iam/eks-mcp-privileged-addon-policy.json) (or confirm `Statement` includes `eks-mcp:CallPrivilegedTool` and `eks:AccessKubernetesApi` for your target cluster path).
 
 ## Step 3: Create IRSA Service Account
 
@@ -337,7 +359,7 @@ This calls `manage_k8s_resource` with a rollout-style patch on `Deployment/cart`
 - [ ] `python3 scripts/render_from_env.py` run when Cursor or manifest templates change
 - [ ] Docker image builds and runs -- `docker run` + `curl` test passes (Step 1)
 - [ ] ECR image pushed -- `docker buildx ... --push` succeeds (Step 1)
-- [ ] IAM add-on policy created -- `EksMcpPrivilegedK8sWritesAddon` exists when using write tools; `aws eks list-clusters` succeeds (Step 2)
+- [ ] IAM add-on policy created -- `aws iam get-policy` for `EksMcpPrivilegedK8sWritesAddon` succeeds when using write tools; managed `AmazonEKSMCPReadOnlyAccess` visible via `aws iam get-policy` (Step 2)
 - [ ] Managed EKS MCP server works locally (optional) -- Cursor agent lists clusters and tools
 - [ ] IRSA service account created -- annotation shows role ARN; role has `AmazonEKSMCPReadOnlyAccess` (+ add-on if used) (Step 3)
 - [ ] IRSA role mapped in aws-auth -- `kubectl get cm aws-auth -n kube-system` shows the role (Step 4)
