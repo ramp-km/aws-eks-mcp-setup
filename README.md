@@ -32,68 +32,7 @@ Elastic Cloud (Kibana 9.3+)            EKS Cluster (<your-aws-region>)          
 - eksctl
 - Elastic Cloud with Kibana 9.3+ (for MCP connector support)
 
-## Step 1: IAM Permissions
-
-### Read-only (default)
-
-Attach the AWS managed policy for read-only access to the managed EKS MCP server (bridge IRSA role or your IAM principal):
-
-```bash
-aws iam attach-role-policy \
-  --role-name <your-iam-role> \
-  --policy-arn arn:aws:iam::aws:policy/AmazonEKSMCPReadOnlyAccess
-```
-
-This grants `eks-mcp:InvokeMcp` and `eks-mcp:CallReadOnlyTool`.
-
-### Kubernetes write tools (`manage_k8s_resource`, `apply_yaml`)
-
-Privileged MCP tools require **`eks-mcp:CallPrivilegedTool`** and **`eks:AccessKubernetesApi`** on the target cluster. Use one of the following.
-
-**Option A (recommended):** Keep `AmazonEKSMCPReadOnlyAccess` and attach the small add-on in this repo:
-
-```bash
-cd /path/to/aws-eks-mcp-setup
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-
-aws iam create-policy \
-  --policy-name EksMcpPrivilegedK8sWritesAddon \
-  --policy-document file://iam/eks-mcp-privileged-addon-policy.json \
-  --description "EKS MCP privileged tools + K8s API for bridge IRSA"
-
-aws iam attach-role-policy \
-  --role-name <irsa-role-name> \
-  --policy-arn arn:aws:iam::${ACCOUNT_ID}:policy/EksMcpPrivilegedK8sWritesAddon
-```
-
-**Option B:** Use a single customer-managed policy that includes read + privileged MCP actions (no managed read-only policy):
-
-```bash
-aws iam create-policy \
-  --policy-name EksMcpK8sWrites \
-  --policy-document file://iam/eks-mcp-k8s-writes-policy.json
-
-aws iam attach-role-policy \
-  --role-name <irsa-role-name> \
-  --policy-arn arn:aws:iam::${ACCOUNT_ID}:policy/EksMcpK8sWrites
-```
-
-For **`manage_eks_stacks`**, **`add_inline_policy`**, or full cluster provisioning, use the broader example in [AWS Getting Started Step 2](https://docs.aws.amazon.com/eks/latest/userguide/eks-mcp-getting-started.html) instead of the trimmed policies above.
-
-After attaching or changing IAM policies on the bridge IRSA role, **restart the bridge Deployment** so the pod picks up credentials that include the new permissions (otherwise `manage_k8s_resource` may return HTTP 403 until the next credential refresh):
-
-```bash
-kubectl rollout restart deployment eks-mcp-bridge -n eks-mcp-bridge
-```
-
-**Verify:**
-
-```bash
-aws sts get-caller-identity
-aws eks list-clusters --region <your-aws-region>
-```
-
-## Step 2: Local Validation (Cursor) (For testing / local validation only)
+## Optional: Local validation (Cursor)
 
 Validate the managed service works locally before deploying the bridge. Open this repo in Cursor, then in agent chat ask:
 
@@ -102,7 +41,7 @@ Validate the managed service works locally before deploying the bridge. Open thi
 
 If using a different region or AWS profile, edit `.cursor/mcp.json` accordingly.
 
-## Step 3: Build and Push Docker Image
+## Step 1: Build and Push Docker Image
 
 ```bash
 cd docker/
@@ -138,9 +77,34 @@ docker buildx build --platform linux/amd64 \
   --push .
 ```
 
-## Step 4: Create IRSA Service Account
+## Step 2: Create IAM policies (read-only and privileged add-on)
 
-The bridge pod needs AWS credentials to sign SigV4 requests to the managed endpoint. Create an IRSA-enabled service account:
+The bridge IRSA identity (created in Step 3) should use the AWS managed policy **`AmazonEKSMCPReadOnlyAccess`**, which grants `eks-mcp:InvokeMcp` and `eks-mcp:CallReadOnlyTool` for the managed EKS MCP server.
+
+Privileged MCP tools (`manage_k8s_resource`, `apply_yaml`) additionally require **`eks-mcp:CallPrivilegedTool`** and **`eks:AccessKubernetesApi`**. For that, create the customer-managed policy **`EksMcpPrivilegedK8sWritesAddon`** from this repo. Step 3 attaches both the managed read-only policy and this add-on to the new IRSA role via `eksctl --attach-policy-arn`; this step only **creates** the add-on policy document in IAM (it does not attach policies to any role).
+
+```bash
+cd /path/to/aws-eks-mcp-setup
+ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+
+aws iam create-policy \
+  --policy-name EksMcpPrivilegedK8sWritesAddon \
+  --policy-document file://iam/eks-mcp-privileged-addon-policy.json \
+  --description "EKS MCP privileged tools + K8s API for bridge IRSA"
+```
+
+For **`manage_eks_stacks`**, **`add_inline_policy`**, or full cluster provisioning, use the broader example in [AWS Getting Started Step 2](https://docs.aws.amazon.com/eks/latest/userguide/eks-mcp-getting-started.html) instead of the trimmed policy above.
+
+**Verify:**
+
+```bash
+aws sts get-caller-identity
+aws eks list-clusters --region <your-aws-region>
+```
+
+## Step 3: Create IRSA Service Account
+
+The bridge pod needs AWS credentials to sign SigV4 requests to the managed endpoint. Create an IRSA-enabled service account. `eksctl` attaches **`AmazonEKSMCPReadOnlyAccess`** and, when listed, **`EksMcpPrivilegedK8sWritesAddon`** to the new role—ensure the add-on policy exists (Step 2) before running with both ARNs.
 
 ```bash
 kubectl create namespace eks-mcp-bridge
@@ -155,7 +119,7 @@ eksctl create iamserviceaccount \
   --approve
 ```
 
-Omit the second `--attach-policy-arn` if you attach the privileged add-on later with `aws iam attach-role-policy`. Replace `<account-id>` and ensure the policy exists (Step 1).
+Omit the second `--attach-policy-arn` if you want read-only MCP tools only (no privileged K8s writes). Replace `<account-id>` with your AWS account ID.
 
 Verify the annotation:
 
@@ -163,11 +127,11 @@ Verify the annotation:
 kubectl get sa eks-mcp-bridge-sa -n eks-mcp-bridge -o yaml | grep eks.amazonaws.com/role-arn
 ```
 
-## Step 5: Map IRSA Role in aws-auth and Apply RBAC
+## Step 4: Map IRSA Role in aws-auth and Apply RBAC
 
-The managed EKS MCP server uses the caller's IAM identity to make Kubernetes API calls on the target cluster. The IRSA role from Step 4 must be mapped to a Kubernetes identity with read permissions, otherwise K8s API calls (e.g. `get_pod_logs`) will fail with 401 Unauthorized.
+The managed EKS MCP server uses the caller's IAM identity to make Kubernetes API calls on the target cluster. The IRSA role from Step 3 must be mapped to a Kubernetes identity with read permissions, otherwise K8s API calls (e.g. `get_pod_logs`) will fail with 401 Unauthorized.
 
-### 5a. Add the IRSA role to the aws-auth ConfigMap
+### 4a. Add the IRSA role to the aws-auth ConfigMap
 
 Get the IRSA role ARN:
 
@@ -190,7 +154,7 @@ Add this entry under `mapRoles` (replace the `rolearn` with your actual value):
       - eks-mcp-readers
 ```
 
-### 5b. Apply the RBAC ClusterRole and ClusterRoleBinding
+### 4b. Apply the RBAC ClusterRole and ClusterRoleBinding
 
 ```bash
 kubectl apply -f kubernetes/rbac.yaml
@@ -198,7 +162,7 @@ kubectl apply -f kubernetes/rbac.yaml
 
 This creates a `eks-mcp-reader` ClusterRole with read-only access to pods, logs, events, deployments, services, nodes, and more, and binds it to the `eks-mcp-readers` group.
 
-### 5c. Writer RBAC (patch, rollout restart, apply YAML)
+### 4c. Writer RBAC (patch, rollout restart, apply YAML)
 
 For **`manage_k8s_resource`** and **`apply_yaml`**, apply the writer ClusterRole (same `eks-mcp-readers` group; permissions merge with the reader binding):
 
@@ -208,7 +172,9 @@ kubectl apply -f kubernetes/rbac-writer.yaml
 
 Narrow this to a namespace by replacing the ClusterRole/Binding with a `Role` and `RoleBinding` if the agent must not mutate cluster-wide objects.
 
-## Step 5d: Cluster API endpoint (required for write tools per AWS)
+## Step 5: Deploy to EKS
+
+### 5a. Cluster API endpoint (required for write tools per AWS)
 
 The [EKS MCP tools reference](https://docs.aws.amazon.com/eks/latest/userguide/eks-mcp-tools.html) documents that **write** Kubernetes operations from the managed server expect a **public** cluster endpoint (`endpointPublicAccess=true`). Confirm:
 
@@ -222,7 +188,7 @@ Confirm `endpointPublicAccess` is `true` (AWS documents this as a requirement fo
 
 If the cluster is private-only, plan for access that satisfies AWS’s current constraints for full-access tools, or restrict the agent to read-only tools.
 
-## Step 6: Deploy to EKS
+### 5b. Apply manifests and verify
 
 Before applying, update `kubernetes/manifests.yaml`:
 - Replace the `image:` field with your ECR image URI
@@ -232,6 +198,12 @@ Before applying, update `kubernetes/manifests.yaml`:
 kubectl apply -f kubernetes/manifests.yaml
 kubectl get pods -n eks-mcp-bridge
 kubectl get svc -n eks-mcp-bridge
+```
+
+After you change IAM permissions on the bridge IRSA role (for example, attaching or updating policies on that role), **restart the bridge Deployment** so pods pick up credentials that include the new permissions (otherwise `manage_k8s_resource` may return HTTP 403 until the next credential refresh):
+
+```bash
+kubectl rollout restart deployment eks-mcp-bridge -n eks-mcp-bridge
 ```
 
 **Test via port-forward:**
@@ -257,19 +229,19 @@ curl -s -m 15 -X POST "http://${LB_HOST}:8888/mcp" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
 ```
 
-## Step 7: Connect to Elastic Agent Builder
+## Step 6: Connect to Elastic Agent Builder
 
-### 7a. Create MCP Connector in Kibana
+### 6a. Create MCP Connector in Kibana
 
 1. Go to **Stack Management > Connectors > Create connector**
 2. Select **MCP** connector type
 3. Configure:
    - **Name:** `AWS EKS MCP (Managed)`
    - **Server URL:** `http://<LoadBalancer-hostname>:8888/mcp`
-   - **HTTP Headers** (secret type): Key=`Authorization`, Value=`Bearer <API_ACCESS_TOKEN from Step-6>` 
+   - **HTTP Headers** (secret type): Key=`Authorization`, Value=`Bearer <API_ACCESS_TOKEN from Step 5>`
 4. Click **Test** to verify the connection
 
-### 7b. Bulk Import MCP Tools
+### 6b. Bulk Import MCP Tools
 
 1. Go to **Agent Builder > Tools**
 2. Click **Manage MCP > Bulk import MCP tools**
@@ -279,7 +251,7 @@ curl -s -m 15 -X POST "http://${LB_HOST}:8888/mcp" \
    - **`apply_yaml`**
 5. Set namespace prefix: `eks`
 
-### 7c. Test End-to-End
+### 6c. Test End-to-End
 
 Create or edit an agent, add the imported EKS tools, then test in chat:
 
@@ -314,28 +286,28 @@ This calls `manage_k8s_resource` with a rollout-style patch on `Deployment/cart`
 
 ## Testing Checklist
 
-- [ ] IAM permissions verified -- `aws eks list-clusters` succeeds
-- [ ] Managed EKS MCP server works locally -- Cursor agent lists clusters and tools
-- [ ] Docker image builds and runs -- `docker run` + `curl` test passes
-- [ ] IRSA service account created -- annotation shows role ARN
-- [ ] IRSA role mapped in aws-auth -- `kubectl get cm aws-auth -n kube-system` shows the role
-- [ ] RBAC applied -- `kubectl get clusterrole eks-mcp-reader` exists
-- [ ] Writer RBAC applied (if using write tools) -- `kubectl get clusterrole eks-mcp-writer` exists
-- [ ] IAM privileged addon attached -- `eks-mcp:CallPrivilegedTool` + `eks:AccessKubernetesApi`
-- [ ] Cluster endpoint -- `endpointPublicAccess=true` for write tools (per AWS docs)
-- [ ] K8s deployment healthy -- pod running, port-forward test passes
-- [ ] LoadBalancer reachable -- `curl` to external endpoint works
-- [ ] Elastic MCP connector connects -- "Test connection" in Kibana succeeds
-- [ ] Tools are discovered -- `listTools` returns 20 EKS MCP tools
-- [ ] Write tools imported -- `manage_k8s_resource` and `apply_yaml` enabled on the agent when needed
-- [ ] Agent chat works -- Agent Builder can query EKS cluster
+- [ ] Docker image builds and runs -- `docker run` + `curl` test passes (Step 1)
+- [ ] ECR image pushed -- `docker buildx ... --push` succeeds (Step 1)
+- [ ] IAM add-on policy created -- `EksMcpPrivilegedK8sWritesAddon` exists when using write tools; `aws eks list-clusters` succeeds (Step 2)
+- [ ] Managed EKS MCP server works locally (optional) -- Cursor agent lists clusters and tools
+- [ ] IRSA service account created -- annotation shows role ARN; role has `AmazonEKSMCPReadOnlyAccess` (+ add-on if used) (Step 3)
+- [ ] IRSA role mapped in aws-auth -- `kubectl get cm aws-auth -n kube-system` shows the role (Step 4)
+- [ ] RBAC applied -- `kubectl get clusterrole eks-mcp-reader` exists (Step 4)
+- [ ] Writer RBAC applied (if using write tools) -- `kubectl get clusterrole eks-mcp-writer` exists (Step 4)
+- [ ] Cluster endpoint -- `endpointPublicAccess=true` for write tools (per AWS docs) (Step 5)
+- [ ] K8s deployment healthy -- pod running, port-forward test passes (Step 5)
+- [ ] LoadBalancer reachable -- `curl` to external endpoint works (Step 5)
+- [ ] Elastic MCP connector connects -- "Test connection" in Kibana succeeds (Step 6)
+- [ ] Tools are discovered -- `listTools` returns 20 EKS MCP tools (Step 6)
+- [ ] Write tools imported -- `manage_k8s_resource` and `apply_yaml` enabled on the agent when needed (Step 6)
+- [ ] Agent chat works -- Agent Builder can query EKS cluster (Step 6)
 
 ## Security Considerations
 
 - **Bearer token:** Generate with `openssl rand -base64 32`. Store in K8s Secret. Rotate periodically.
 - **Network:** Restrict LoadBalancer security group to Elastic Cloud IP ranges only.
 - **TLS:** For production, add an Ingress with TLS termination (ACM cert + ALB Ingress Controller).
-- **IRSA:** Prefer `AmazonEKSMCPReadOnlyAccess` plus [iam/eks-mcp-privileged-addon-policy.json](iam/eks-mcp-privileged-addon-policy.json) only if you need privileged MCP tools.
+- **IRSA:** Prefer `AmazonEKSMCPReadOnlyAccess` plus [iam/eks-mcp-privileged-addon-policy.json](iam/eks-mcp-privileged-addon-policy.json) only if you need privileged MCP tools; Step 2 creates the add-on policy, Step 3 attaches policies when creating the service account.
 - **K8s RBAC:** [kubernetes/rbac.yaml](kubernetes/rbac.yaml) is read-only; [kubernetes/rbac-writer.yaml](kubernetes/rbac-writer.yaml) adds create/update/patch/delete for common workload types. Narrow or split groups if read and write identities should differ.
-- **Read-only mode:** To block privileged tools, add `--read-only` to `mcp-proxy-for-aws` in the Dockerfile **and** do not attach IAM `CallPrivilegedTool` / writer RBAC.
+- **Read-only mode:** To block privileged tools, add `--read-only` to `mcp-proxy-for-aws` in the Dockerfile **and** omit the privileged add-on at IRSA creation **and** do not apply writer RBAC.
 - **CloudTrail:** The managed service automatically logs all tool calls for auditing.
