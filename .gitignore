@@ -1,4 +1,5 @@
 .env
+kubernetes/manifests.rendered.yaml
 *.tfstate
 *.tfstate.backup
 .terraform/

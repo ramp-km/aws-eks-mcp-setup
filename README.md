@@ -32,50 +32,91 @@ Elastic Cloud (Kibana 9.3+)            EKS Cluster (<your-aws-region>)          
 - eksctl
 - Elastic Cloud with Kibana 9.3+ (for MCP connector support)
 
+## Configure AWS region and account (set once per shell)
+
+1. In the **repository root**, copy the sample file and set your values in `.env` (this file is gitignored):
+
+```bash
+cp env.example .env
+```
+
+2. Set at least `AWS_REGION` and `AWS_ACCOUNT_ID` (you can fill `AWS_ACCOUNT_ID` with `export AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)`). Optionally set `EKS_CLUSTER_NAME` for the commands in Step 3 and Step 5. Set `API_ACCESS_TOKEN` before rendering manifests in Step 5, or let the render script generate one (see below).
+
+3. In each terminal where you run the commands in this guide, **load the variables** from the repository root. Either:
+
+```bash
+set -a && source .env && set +a
+```
+
+or (Bash only):
+
+```bash
+. ./scripts/load-env.sh
+```
+
+The helper script also exports a default `EKS_MCP_BRIDGE_IMAGE` of `${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/eks-mcp-bridge:latest` if unset.
+
+4. **Templated config files** read the same values so you do not have to re-type region and account in JSON or YAML. From the repository root, after your `.env` is loaded, run when you need to refresh generated files:
+
+```bash
+python3 scripts/render_from_env.py
+```
+
+- Writes **`.cursor/mcp.json`** from [`.cursor/mcp.json.template`](.cursor/mcp.json.template) (for optional local validation with Cursor).
+- Writes **`kubernetes/manifests.rendered.yaml`** from [`kubernetes/manifests.envsubst.yaml`](kubernetes/manifests.envsubst.yaml) (for Step 5; file is gitignored). If `API_ACCESS_TOKEN` is empty in `.env`, the script generates a random value and logs a warning; set a stable token in `.env` for production (for example with `openssl rand -base64 32`).
+
+You can render only the MCP or only the manifests: `python3 scripts/render_from_env.py mcp` or `python3 scripts/render_from_env.py manifests`.
+
+The committed [`.cursor/mcp.json`](.cursor/mcp.json) defaults to `us-east-1` so a clone works before you configure `.env`; re-run the render step after you change `AWS_REGION` to keep it in sync.
+
 ## Optional: Local validation (Cursor)
 
-Validate the managed service works locally before deploying the bridge. Open this repo in Cursor, then in agent chat ask:
+Validate the managed service works locally before deploying the bridge. After configuring `.env` and running `python3 scripts/render_from_env.py mcp` so `.cursor/mcp.json` matches your region, open this repo in Cursor, then in agent chat ask:
 
 - "What EKS MCP tools are available?"
 - "List all EKS clusters in <your-aws-region>"
 
-If using a different region or AWS profile, edit `.cursor/mcp.json` accordingly.
+If you use a different AWS profile, configure it for the CLI; the MCP process uses the same default credential chain.
 
 ## Step 1: Build and Push Docker Image
+
+With `.env` loaded in your shell (see [Configure AWS region and account](#configure-aws-region-and-account-set-once-per-shell)):
 
 ```bash
 cd docker/
 
-# Build for amd64 (EKS nodes)
+# Build for amd64 (EKS nodes; image uses AWS_REGION at runtime, not at build)
 docker buildx build --platform linux/amd64 -t eks-mcp-bridge:latest .
 
-# Local test (mount AWS creds)
+# Local test (mount AWS creds; pass the same region as in .env)
 docker run -p 8888:8888 \
   -e API_ACCESS_TOKEN="test-token" \
-  -e AWS_REGION="<your-aws-region>" \
+  -e AWS_REGION="${AWS_REGION}" \
   -v ~/.aws:/root/.aws:ro \
   eks-mcp-bridge:latest
+```
 
-# Verify (in another terminal)
+**Verify (in another terminal):**
+
+```bash
 curl -s -m 15 -X POST http://localhost:8888/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
 ```
 
-Push to ECR:
+**Push to ECR** (from the `docker/` directory, with `.env` still loaded in the shell):
 
 ```bash
-AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-AWS_REGION="<your-aws-region>"
-
-aws ecr create-repository --repository-name eks-mcp-bridge --region $AWS_REGION 2>/dev/null
-aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
+aws ecr create-repository --repository-name eks-mcp-bridge --region "${AWS_REGION}" 2>/dev/null
+aws ecr get-login-password --region "${AWS_REGION}" | docker login --username AWS --password-stdin "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
 
 docker buildx build --platform linux/amd64 \
-  -t ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/eks-mcp-bridge:latest \
+  -t "${EKS_MCP_BRIDGE_IMAGE}" \
   --push .
 ```
+
+If you have not used `load-env.sh`, set `EKS_MCP_BRIDGE_IMAGE` yourself or use the long form: `${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/eks-mcp-bridge:latest`.
 
 ## Step 2: Create IAM policies (read-only and privileged add-on)
 
@@ -83,9 +124,10 @@ The bridge IRSA identity (created in Step 3) should use the AWS managed policy *
 
 Privileged MCP tools (`manage_k8s_resource`, `apply_yaml`) additionally require **`eks-mcp:CallPrivilegedTool`** and **`eks:AccessKubernetesApi`**. For that, create the customer-managed policy **`EksMcpPrivilegedK8sWritesAddon`** from this repo. Step 3 attaches both the managed read-only policy and this add-on to the new IRSA role via `eksctl --attach-policy-arn`; this step only **creates** the add-on policy document in IAM (it does not attach policies to any role).
 
+From the **repository root**, with `.env` loaded:
+
 ```bash
 cd /path/to/aws-eks-mcp-setup
-ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
 
 aws iam create-policy \
   --policy-name EksMcpPrivilegedK8sWritesAddon \
@@ -99,12 +141,14 @@ For **`manage_eks_stacks`**, **`add_inline_policy`**, or full cluster provisioni
 
 ```bash
 aws sts get-caller-identity
-aws eks list-clusters --region <your-aws-region>
+aws eks list-clusters --region "${AWS_REGION}"
 ```
 
 ## Step 3: Create IRSA Service Account
 
 The bridge pod needs AWS credentials to sign SigV4 requests to the managed endpoint. Create an IRSA-enabled service account. `eksctl` attaches **`AmazonEKSMCPReadOnlyAccess`** and, when listed, **`EksMcpPrivilegedK8sWritesAddon`** to the new role—ensure the add-on policy exists (Step 2) before running with both ARNs.
+
+With `.env` loaded and `EKS_CLUSTER_NAME` set in `.env` (or export it in the shell for this command):
 
 ```bash
 kubectl create namespace eks-mcp-bridge
@@ -112,14 +156,14 @@ kubectl create namespace eks-mcp-bridge
 eksctl create iamserviceaccount \
   --name eks-mcp-bridge-sa \
   --namespace eks-mcp-bridge \
-  --cluster <your-cluster-name> \
-  --region <your-aws-region> \
+  --cluster "${EKS_CLUSTER_NAME}" \
+  --region "${AWS_REGION}" \
   --attach-policy-arn arn:aws:iam::aws:policy/AmazonEKSMCPReadOnlyAccess \
-  --attach-policy-arn arn:aws:iam::<account-id>:policy/EksMcpPrivilegedK8sWritesAddon \
+  --attach-policy-arn "arn:aws:iam::${AWS_ACCOUNT_ID}:policy/EksMcpPrivilegedK8sWritesAddon" \
   --approve
 ```
 
-Omit the second `--attach-policy-arn` if you want read-only MCP tools only (no privileged K8s writes). Replace `<account-id>` with your AWS account ID.
+Omit the second `--attach-policy-arn` if you want read-only MCP tools only (no privileged K8s writes).
 
 Verify the annotation:
 
@@ -176,10 +220,10 @@ Narrow this to a namespace by replacing the ClusterRole/Binding with a `Role` an
 
 ### 5a. Cluster API endpoint (required for write tools per AWS)
 
-The [EKS MCP tools reference](https://docs.aws.amazon.com/eks/latest/userguide/eks-mcp-tools.html) documents that **write** Kubernetes operations from the managed server expect a **public** cluster endpoint (`endpointPublicAccess=true`). Confirm:
+The [EKS MCP tools reference](https://docs.aws.amazon.com/eks/latest/userguide/eks-mcp-tools.html) documents that **write** Kubernetes operations from the managed server expect a **public** cluster endpoint (`endpointPublicAccess=true`). Confirm (with `EKS_CLUSTER_NAME` in your environment from `.env`):
 
 ```bash
-aws eks describe-cluster --name <your-cluster-name> --region <region> \
+aws eks describe-cluster --name "${EKS_CLUSTER_NAME}" --region "${AWS_REGION}" \
   --query 'cluster.resourcesVpcConfig' \
   --output json
 ```
@@ -190,15 +234,18 @@ If the cluster is private-only, plan for access that satisfies AWS’s current c
 
 ### 5b. Apply manifests and verify
 
-Before applying, update `kubernetes/manifests.yaml`:
-- Replace the `image:` field with your ECR image URI
-- Replace the `API_ACCESS_TOKEN` value with a strong token (`openssl rand -base64 32`)
+Set `API_ACCESS_TOKEN` in `.env` to a strong value (`openssl rand -base64 32`) unless you accept the one generated by the render script. The image and region come from the same `.env` as above.
+
+From the **repository root**, with `.env` loaded:
 
 ```bash
-kubectl apply -f kubernetes/manifests.yaml
+python3 scripts/render_from_env.py manifests
+kubectl apply -f kubernetes/manifests.rendered.yaml
 kubectl get pods -n eks-mcp-bridge
 kubectl get svc -n eks-mcp-bridge
 ```
+
+`kubernetes/manifests.envsubst.yaml` is the source template; `kubernetes/manifests.rendered.yaml` is the generated file and is listed in `.gitignore` so secrets are not committed.
 
 After you change IAM permissions on the bridge IRSA role (for example, attaching or updating policies on that role), **restart the bridge Deployment** so pods pick up credentials that include the new permissions (otherwise `manage_k8s_resource` may return HTTP 403 until the next credential refresh):
 
@@ -238,7 +285,7 @@ curl -s -m 15 -X POST "http://${LB_HOST}:8888/mcp" \
 3. Configure:
    - **Name:** `AWS EKS MCP (Managed)`
    - **Server URL:** `http://<LoadBalancer-hostname>:8888/mcp`
-   - **HTTP Headers** (secret type): Key=`Authorization`, Value=`Bearer <API_ACCESS_TOKEN from Step 5>`
+   - **HTTP Headers** (secret type): Key=`Authorization`, Value=`Bearer <API_ACCESS_TOKEN from Step 5>` (the same value you set in `.env` or the rendered manifest secret)
 4. Click **Test** to verify the connection
 
 ### 6b. Bulk Import MCP Tools
@@ -286,6 +333,8 @@ This calls `manage_k8s_resource` with a rollout-style patch on `Deployment/cart`
 
 ## Testing Checklist
 
+- [ ] `.env` present with `AWS_REGION` and `AWS_ACCOUNT_ID` (and `EKS_CLUSTER_NAME` for cluster commands)
+- [ ] `python3 scripts/render_from_env.py` run when Cursor or manifest templates change
 - [ ] Docker image builds and runs -- `docker run` + `curl` test passes (Step 1)
 - [ ] ECR image pushed -- `docker buildx ... --push` succeeds (Step 1)
 - [ ] IAM add-on policy created -- `EksMcpPrivilegedK8sWritesAddon` exists when using write tools; `aws eks list-clusters` succeeds (Step 2)
@@ -304,10 +353,11 @@ This calls `manage_k8s_resource` with a rollout-style patch on `Deployment/cart`
 
 ## Security Considerations
 
+- **`.env` and generated manifests:** Do not commit `.env` or `kubernetes/manifests.rendered.yaml`. Keep `API_ACCESS_TOKEN` only in `.env` and in the cluster Secret.
 - **Bearer token:** Generate with `openssl rand -base64 32`. Store in K8s Secret. Rotate periodically.
 - **Network:** Restrict LoadBalancer security group to Elastic Cloud IP ranges only.
 - **TLS:** For production, add an Ingress with TLS termination (ACM cert + ALB Ingress Controller).
 - **IRSA:** Prefer `AmazonEKSMCPReadOnlyAccess` plus [iam/eks-mcp-privileged-addon-policy.json](iam/eks-mcp-privileged-addon-policy.json) only if you need privileged MCP tools; Step 2 creates the add-on policy, Step 3 attaches policies when creating the service account.
 - **K8s RBAC:** [kubernetes/rbac.yaml](kubernetes/rbac.yaml) is read-only; [kubernetes/rbac-writer.yaml](kubernetes/rbac-writer.yaml) adds create/update/patch/delete for common workload types. Narrow or split groups if read and write identities should differ.
-- **Read-only mode:** To block privileged tools, add `--read-only` to `mcp-proxy-for-aws` in the Dockerfile **and** omit the privileged add-on at IRSA creation **and** do not apply writer RBAC.
+- **Read-only mode:** To block privileged tools, add `--read-only` to `mcp-proxy-for-aws` in [docker/entrypoint.sh](docker/entrypoint.sh) **and** omit the privileged add-on at IRSA creation **and** do not apply writer RBAC.
 - **CloudTrail:** The managed service automatically logs all tool calls for auditing.
