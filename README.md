@@ -269,11 +269,7 @@ kubectl get svc -n eks-mcp-bridge
 
 `kubernetes/manifests.envsubst.yaml` is the source template; `kubernetes/manifests.rendered.yaml` is the generated file and is listed in `.gitignore` so secrets are not committed.
 
-After you change IAM permissions on the bridge IRSA role (for example, attaching or updating policies on that role), **restart the bridge Deployment** so pods pick up credentials that include the new permissions (otherwise `manage_k8s_resource` may return HTTP 403 until the next credential refresh):
-
-```bash
-kubectl rollout restart deployment eks-mcp-bridge -n eks-mcp-bridge
-```
+**IAM note:** You do not need a pod restart in Step 5b for normal policy work. If you add or change IAM **policies** on the **same** role that IRSA already uses, AWS authorizes each API call against the current policy; new pods are not required. Schedule new pods (for example `kubectl rollout restart deployment eks-mcp-bridge -n eks-mcp-bridge`) mainly when the **ServiceAccount**’s `eks.amazonaws.com/role-arn` changes to a **different** role, or as a last resort if you still see `403` after a policy change once IAM has finished propagating.
 
 **Test via port-forward:**
 
